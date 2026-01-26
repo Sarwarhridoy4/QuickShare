@@ -1,23 +1,16 @@
 package main
 
 import (
-    "fyne.io/fyne/v2/app"
-    "fyne.io/fyne/v2/container"
-    "fyne.io/fyne/v2/widget"
+	"github.com/Sarwarhridoy4/QuickShare/internal/ui"
+	"github.com/Sarwarhridoy4/QuickShare/internal/utils"
 )
 
 func main() {
-    myApp := app.New()
-    myWindow := myApp.NewWindow("Hello Fyne")
+	// Initialize logger
+	utils.InitLogger()
+	utils.Log("Starting File Transfer Application")
 
-    myWindow.SetContent(
-        container.NewVBox(
-            widget.NewLabel("Welcome to Fyne!"),
-            widget.NewButton("Click Me", func() {
-                myWindow.SetContent(widget.NewLabel("Button Clicked!"))
-            }),
-        ),
-    )
-
-    myWindow.ShowAndRun()
+	// Create and run the application
+	app := ui.NewFileTransferApp()
+	app.Run()
 }

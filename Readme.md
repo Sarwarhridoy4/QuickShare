@@ -9,6 +9,7 @@ A high-speed, cross-platform file transfer application built with Go and Fyne, s
 - 🖥️ **Cross-Platform**: Works on Windows, macOS, Linux, Android, and iOS
 - ⚡ **Non-Blocking Operations**: Multithreaded transfers using Go routines
 - 📊 **Real-Time Progress**: Live transfer progress and speed indicators
+- 📁 **Custom Download Location**: Choose where to save received files
 - 🔒 **Reliable**: Robust error handling and automatic retries
 - 📝 **Logging**: Comprehensive logging for debugging and monitoring
 
@@ -112,10 +113,11 @@ fyne package -os ios -appID com.filetransfer.app
 ### Receiving a File
 
 1. Launch the application
-2. Note your IP address displayed in the app
-3. Click "Receive File"
-4. The app will wait for incoming transfers
-5. Files are saved in the `downloads/` directory
+2. (Optional) Click "Choose Download Location" to set a custom save location
+3. Note your IP address displayed in the app
+4. Click "Receive File"
+5. The app will wait for incoming transfers
+6. Files are saved in the configured download directory (default: `downloads/`)
 
 ## Configuration
 
@@ -131,6 +133,15 @@ The application creates a configuration file at `config/app_config.json` with th
   "enable_encryption": false
 }
 ```
+
+### Changing Download Location
+
+You can change the download location in two ways:
+
+1. **Using the UI**: Click "Choose Download Location" button and select a folder
+2. **Editing config**: Manually edit `config/app_config.json` and change the `download_path` value
+
+The download path will be validated and created if it doesn't exist.
 
 ## Network Requirements
 
