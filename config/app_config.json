@@ -2,7 +2,7 @@
   "default_port": 9999,
   "chunk_size": 65536,
   "max_concurrency": 4,
-  "download_path": "/home/sarwar/Desktop",
+  "download_path": "/home/sarwar/Downloads",
   "auto_accept": false,
   "enable_encryption": false
 }
