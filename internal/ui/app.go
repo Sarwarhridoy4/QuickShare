@@ -1,11 +1,13 @@
 package ui
 
 import (
+	"fmt"
+	"path/filepath"
+	"runtime"
+
 	"github.com/Sarwarhridoy4/QuickShare/internal/file"
 	"github.com/Sarwarhridoy4/QuickShare/internal/network"
 	"github.com/Sarwarhridoy4/QuickShare/internal/utils"
-	"fmt"
-	"runtime"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
@@ -24,6 +26,8 @@ type FileTransferApp struct {
 	ipLabel         *widget.Label
 	downloadPathLabel *widget.Label
 	config          *utils.Config
+	selectedFiles   []string
+	fileListWidget  *widget.List
 }
 
 func NewFileTransferApp() *FileTransferApp {
@@ -54,6 +58,7 @@ func NewFileTransferApp() *FileTransferApp {
 		ipLabel:           widget.NewLabel("IP: Detecting..."),
 		downloadPathLabel: widget.NewLabel(fmt.Sprintf("Download: %s", cfg.DownloadPath)),
 		config:            cfg,
+		selectedFiles:     []string{},
 	}
 
 	fta.setupUI()
@@ -86,12 +91,43 @@ func (fta *FileTransferApp) setupUI() {
 		fta.statusLabel,
 	)
 	
+	// File list widget with selection support
+	selectedFileIdx := -1
+	fta.fileListWidget = widget.NewList(
+		func() int { return len(fta.selectedFiles) },
+		func() fyne.CanvasObject { return widget.NewLabel("") },
+		func(id widget.ListItemID, obj fyne.CanvasObject) {
+			obj.(*widget.Label).SetText(filepath.Base(fta.selectedFiles[id]))
+		},
+	)
+	fta.fileListWidget.OnSelected = func(id widget.ListItemID) {
+		selectedFileIdx = id
+	}
+	
+	// Remove button
+	removeFileBtn := widget.NewButton("Remove Selected", func() {
+		if selectedFileIdx >= 0 && selectedFileIdx < len(fta.selectedFiles) {
+			fta.selectedFiles = append(fta.selectedFiles[:selectedFileIdx], fta.selectedFiles[selectedFileIdx+1:]...)
+			fta.fileListWidget.Refresh()
+			fta.updateFileLabel()
+			selectedFileIdx = -1
+		}
+	})
+	
+	clearFilesBtn := widget.NewButton("Clear All", func() {
+		fta.selectedFiles = []string{}
+		fta.fileListWidget.Refresh()
+		fta.updateFileLabel()
+	})
+
 	// File selection section
 	fileBox := container.NewVBox(
 		widget.NewLabelWithStyle("File Selection", 
 			fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
 		selectFileBtn,
 		fta.filePathLabel,
+		fta.fileListWidget,
+		container.NewHBox(removeFileBtn, clearFilesBtn),
 	)
 	
 	// Download location section
@@ -167,15 +203,35 @@ func (fta *FileTransferApp) handleSelectFile() {
 		}
 		defer reader.Close()
 		
-		fta.filePathLabel.SetText(reader.URI().Path())
-		utils.Log(fmt.Sprintf("File selected: %s", reader.URI().Path()))
+		filePath := reader.URI().Path()
+		// Check if file is already selected
+		for _, f := range fta.selectedFiles {
+			if f == filePath {
+				dialog.ShowInformation("Duplicate", "This file is already selected", fta.window)
+				return
+			}
+		}
+		
+		fta.selectedFiles = append(fta.selectedFiles, filePath)
+		fta.fileListWidget.Refresh()
+		fta.updateFileLabel()
+		utils.Log(fmt.Sprintf("File added: %s (Total: %d)", filePath, len(fta.selectedFiles)))
 	}, fta.window)
 }
 
+func (fta *FileTransferApp) updateFileLabel() {
+	if len(fta.selectedFiles) == 0 {
+		fta.filePathLabel.SetText("No files selected")
+	} else if len(fta.selectedFiles) == 1 {
+		fta.filePathLabel.SetText(fmt.Sprintf("1 file selected: %s", filepath.Base(fta.selectedFiles[0])))
+	} else {
+		fta.filePathLabel.SetText(fmt.Sprintf("%d files selected", len(fta.selectedFiles)))
+	}
+}
+
 func (fta *FileTransferApp) handleSendFile() {
-	filePath := fta.filePathLabel.Text
-	if filePath == "No file selected" {
-		dialog.ShowInformation("No File", "Please select a file first", fta.window)
+	if len(fta.selectedFiles) == 0 {
+		dialog.ShowInformation("No Files", "Please select at least one file first", fta.window)
 		return
 	}
 	
@@ -195,11 +251,11 @@ func (fta *FileTransferApp) handleSendFile() {
 		
 		// Start transfer in goroutine
 		go func() {
-			progressChan := make(chan float64, 10)
+			progressChan := make(chan float64, 100)
 			errChan := make(chan error, 1)
 			
 			go func() {
-				err := fta.transferMgr.SendFile(filePath, entry.Text, progressChan)
+				err := fta.transferMgr.SendMultipleFiles(fta.selectedFiles, entry.Text, progressChan)
 				errChan <- err
 			}()
 			
@@ -215,7 +271,8 @@ func (fta *FileTransferApp) handleSendFile() {
 					} else {
 						fta.statusLabel.SetText("Transfer complete!")
 						fta.progressBar.SetValue(1.0)
-						dialog.ShowInformation("Success", "File sent successfully", fta.window)
+						dialog.ShowInformation("Success", 
+							fmt.Sprintf("%d file(s) sent successfully", len(fta.selectedFiles)), fta.window)
 					}
 					return
 				}
