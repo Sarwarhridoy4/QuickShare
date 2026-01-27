@@ -1,19 +1,20 @@
 package ui
 
 import (
-	"github.com/Sarwarhridoy4/QuickShare/internal/file"
-	"github.com/Sarwarhridoy4/QuickShare/internal/network"
-	"github.com/Sarwarhridoy4/QuickShare/internal/utils"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
+	"github.com/Sarwarhridoy4/QuickShare/internal/file"
+	"github.com/Sarwarhridoy4/QuickShare/internal/network"
+	"github.com/Sarwarhridoy4/QuickShare/internal/utils"
 )
 
 type FileTransferApp struct {
@@ -262,14 +263,27 @@ func (fta *FileTransferApp) onDevicesUpdated(devices []*network.Device) {
 }
 
 func (fta *FileTransferApp) connectToDevice(device *network.Device) {
-	dialog.ShowInformation("Connecting", 
-		fmt.Sprintf("Connecting to %s...", device.Name), fta.window)
+	utils.Log(fmt.Sprintf("User initiated connection to %s", device.Name))
+	
+	progressDialog := dialog.NewCustom("Connecting", "Cancel", 
+		widget.NewLabel(fmt.Sprintf("Connecting to %s...\nPlease wait...", device.Name)), 
+		fta.window)
+	progressDialog.Show()
 	
 	go func() {
 		hostname, _ := os.Hostname()
+		if hostname == "" {
+			hostname = "Unknown Device"
+		}
+		
 		session, err := fta.transferMgr.ConnectToDevice(device, hostname)
+		
+		// Close progress dialog
+		progressDialog.Hide()
+		
 		if err != nil {
-			dialog.ShowError(fmt.Errorf("Connection failed: %w", err), fta.window)
+			utils.LogError("Connection failed", err)
+			dialog.ShowError(fmt.Errorf("Connection failed: %v", err), fta.window)
 			return
 		}
 		
@@ -278,7 +292,8 @@ func (fta *FileTransferApp) connectToDevice(device *network.Device) {
 		fta.statusLabel.SetText("Connected - Ready to transfer files")
 		
 		dialog.ShowInformation("Connected", 
-			fmt.Sprintf("Successfully connected to %s", device.Name), fta.window)
+			fmt.Sprintf("Successfully connected to %s!\n\nYou can now send files.", device.Name), 
+			fta.window)
 		
 		fta.showScreen("session")
 		
@@ -288,29 +303,46 @@ func (fta *FileTransferApp) connectToDevice(device *network.Device) {
 }
 
 func (fta *FileTransferApp) handleConnectionRequest(session *network.Session, req *network.ConnectionRequest) bool {
+	utils.Log(fmt.Sprintf("Handling connection request from %s", req.DeviceName))
+	
+	// Channel to communicate user's decision
 	approved := make(chan bool, 1)
 	
-	fta.window.Canvas().Content().Show()
+	// Show dialog on UI thread
+	fta.window.Canvas().Content().Refresh()
 	
-	dialog.ShowConfirm("Connection Request", 
-		fmt.Sprintf("%s wants to connect\n\nAccept connection?", req.DeviceName),
-		func(accept bool) {
-			approved <- accept
-		}, fta.window)
+	go func() {
+		dialog.ShowConfirm("Connection Request", 
+			fmt.Sprintf("%s (%s) wants to connect\n\nAccept connection?", 
+				req.DeviceName, req.DeviceType),
+			func(accept bool) {
+				utils.Log(fmt.Sprintf("User decision: %v", accept))
+				approved <- accept
+			}, fta.window)
+	}()
 	
-	accepted := <-approved
-	
-	if accepted {
-		fta.activeSession = session
-		fta.remoteDeviceLabel.SetText(fmt.Sprintf("Connected to: %s", req.DeviceName))
-		fta.statusLabel.SetText("Connected - Ready to transfer files")
-		fta.showScreen("session")
-		
-		// Start monitoring session
-		go fta.monitorSession()
+	// Wait for user decision with timeout
+	select {
+	case accepted := <-approved:
+		if accepted {
+			utils.Log("Connection accepted by user")
+			fta.activeSession = session
+			fta.remoteDeviceLabel.SetText(fmt.Sprintf("Connected to: %s", req.DeviceName))
+			fta.statusLabel.SetText("Connected - Ready to transfer files")
+			fta.showScreen("session")
+			
+			// Start monitoring session
+			go fta.monitorSession()
+			
+			return true
+		} else {
+			utils.Log("Connection rejected by user")
+			return false
+		}
+	case <-time.After(60 * time.Second):
+		utils.Log("Connection request dialog timeout")
+		return false
 	}
-	
-	return accepted
 }
 
 func (fta *FileTransferApp) monitorSession() {
@@ -318,30 +350,69 @@ func (fta *FileTransferApp) monitorSession() {
 		return
 	}
 	
+	utils.Log("Starting session monitor")
 	msgChan := fta.activeSession.GetMessageChannel()
 	
 	for msg := range msgChan {
 		switch msg.Type {
 		case network.MsgFileOffer:
+			utils.Log("Received file offer, starting receive")
 			// Incoming file - automatically start receiving
 			go fta.receiveFile()
+			
+		case network.MsgKeepAlive:
+			// Just a keepalive, ignore it
+			utils.LogDebug("Received keepalive")
+			
+		case network.MsgConnectionReject:
+			utils.Log("Connection rejected by remote")
+			dialog.ShowError(fmt.Errorf("connection closed by remote device"), fta.window)
+			fta.handleDisconnect()
+			return
+			
+		default:
+			utils.LogDebug(fmt.Sprintf("Received message type: %v", msg.Type))
 		}
 	}
+	utils.Log("Session message channel closed")
 }
 
 func (fta *FileTransferApp) handleSelectAndSendFiles() {
+	// Check if session is still active
+	if fta.activeSession == nil {
+		dialog.ShowError(fmt.Errorf("no active connection"), fta.window)
+		return
+	}
+	
+	session := fta.activeSession
+	if session.State != network.SessionActive {
+		dialog.ShowError(fmt.Errorf("session is not active"), fta.window)
+		fta.handleDisconnect()
+		return
+	}
+	
 	dialog.ShowFileOpen(func(reader fyne.URIReadCloser, err error) {
-		if err != nil || reader == nil {
+		if err != nil {
+			dialog.ShowError(err, fta.window)
+			return
+		}
+		if reader == nil {
 			return
 		}
 		defer reader.Close()
 		
 		filePath := reader.URI().Path()
+		utils.Log(fmt.Sprintf("User selected file: %s", filePath))
 		fta.sendFile(filePath)
 	}, fta.window)
 }
 
 func (fta *FileTransferApp) sendFile(filePath string) {
+	if fta.activeSession == nil {
+		dialog.ShowError(fmt.Errorf("no active connection"), fta.window)
+		return
+	}
+	
 	fileName := filepath.Base(filePath)
 	fta.currentFileLabel.SetText(fmt.Sprintf("Sending: %s", fileName))
 	fta.progressBar.SetValue(0)
@@ -359,30 +430,52 @@ func (fta *FileTransferApp) sendFile(filePath string) {
 		}()
 		
 		// Monitor progress
+		ticker := time.NewTicker(100 * time.Millisecond)
+		defer ticker.Stop()
+		
+		var lastProgress float64
+		
 		for {
 			select {
 			case progress := <-progressChan:
+				lastProgress = progress
 				fta.progressBar.SetValue(progress)
 				
 				// Calculate speed
 				elapsed := utils.Since(startTime).Seconds()
 				if elapsed > 0 {
-					fileInfo, _ := os.Stat(filePath)
-					if fileInfo != nil {
+					fileInfo, err := os.Stat(filePath)
+					if err == nil && fileInfo != nil {
 						bytesTransferred := int64(progress * float64(fileInfo.Size()))
 						speed := float64(bytesTransferred) / elapsed / 1024 / 1024
 						fta.speedLabel.SetText(fmt.Sprintf("Speed: %.2f MB/s", speed))
 					}
 				}
 				
+			case <-ticker.C:
+				// Update UI periodically even without new progress
+				if lastProgress > 0 && lastProgress < 1.0 {
+					elapsed := utils.Since(startTime).Seconds()
+					if elapsed > 0 {
+						fileInfo, err := os.Stat(filePath)
+						if err == nil && fileInfo != nil {
+							bytesTransferred := int64(lastProgress * float64(fileInfo.Size()))
+							speed := float64(bytesTransferred) / elapsed / 1024 / 1024
+							fta.speedLabel.SetText(fmt.Sprintf("Speed: %.2f MB/s (%.0f%%)", speed, lastProgress*100))
+						}
+					}
+				}
+				
 			case err := <-done:
 				if err != nil {
-					dialog.ShowError(err, fta.window)
+					dialog.ShowError(fmt.Errorf("Transfer failed: %v", err), fta.window)
 					fta.statusLabel.SetText(fmt.Sprintf("Error: %v", err))
+					utils.LogError("File send failed", err)
 				} else {
 					fta.progressBar.SetValue(1.0)
 					dialog.ShowInformation("Success", "File sent successfully!", fta.window)
 					fta.statusLabel.SetText("File sent successfully")
+					utils.Log("File sent successfully")
 				}
 				fta.showScreen("session")
 				return
@@ -460,14 +553,24 @@ func (fta *FileTransferApp) handleChooseDownloadLocation() {
 }
 
 func (fta *FileTransferApp) handleDisconnect() {
+	utils.Log("User initiated disconnect")
+	
 	if fta.activeSession != nil {
 		fta.activeSession.Close()
 		fta.activeSession = nil
+		utils.Log("Session closed")
 	}
 	
 	fta.transferMgr.CloseSession()
 	fta.statusLabel.SetText("Disconnected")
+	fta.remoteDeviceLabel.SetText("Not connected")
+	
+	// Return to discovery screen
 	fta.showScreen("discovery")
+	
+	// Refresh device list
+	fta.discoveredDevices = fta.discoveryService.GetActiveDevices()
+	fta.deviceList.Refresh()
 }
 
 func (fta *FileTransferApp) Run() {

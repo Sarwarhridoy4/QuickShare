@@ -78,9 +78,14 @@ func (tm *TransferManager) acceptConnections() {
 
 // handleIncomingSession handles a new incoming session
 func (tm *TransferManager) handleIncomingSession(session *Session) {
-	// Wait for connection request
-	msgChan := session.GetMessageChannel()
+	// Start session first to begin receiving messages
 	session.Start()
+	
+	// Wait for connection request with longer timeout
+	msgChan := session.GetMessageChannel()
+	
+	timeout := time.NewTimer(30 * time.Second)
+	defer timeout.Stop()
 	
 	select {
 	case msg := <-msgChan:
@@ -95,19 +100,37 @@ func (tm *TransferManager) handleIncomingSession(session *Session) {
 			session.RemoteDevice.Name = req.DeviceName
 			session.RemoteDevice.DeviceType = req.DeviceType
 			
-			// Ask user for approval
+			utils.Log(fmt.Sprintf("Connection request from %s (%s)", req.DeviceName, session.RemoteDevice.IP))
+			
+			// Ask user for approval (this blocks until user responds)
 			if tm.onSessionRequest != nil {
 				accepted := tm.onSessionRequest(session, &req)
 				if accepted {
-					session.AcceptConnection()
+					utils.Log("Connection accepted by user")
+					if err := session.AcceptConnection(); err != nil {
+						utils.LogError("Failed to send accept message", err)
+						session.Close()
+						return
+					}
 					tm.setActiveSession(session)
+					utils.Log("Session established successfully")
 				} else {
+					utils.Log("Connection rejected by user")
 					session.RejectConnection()
+					time.Sleep(100 * time.Millisecond) // Give time for reject message to send
 					session.Close()
 				}
+			} else {
+				utils.Log("No session request handler, rejecting connection")
+				session.RejectConnection()
+				time.Sleep(100 * time.Millisecond)
+				session.Close()
 			}
+		} else {
+			utils.Log(fmt.Sprintf("Unexpected message type: %v", msg.Type))
+			session.Close()
 		}
-	case <-time.After(30 * time.Second):
+	case <-timeout.C:
 		utils.Log("Connection request timeout")
 		session.Close()
 	}
@@ -130,28 +153,36 @@ func (tm *TransferManager) ConnectToDevice(device *Device, localDeviceName strin
 	// Send connection request
 	if err := session.SendConnectionRequest(localDeviceName, getDeviceType()); err != nil {
 		session.Close()
-		return nil, err
+		return nil, fmt.Errorf("failed to send connection request: %w", err)
 	}
 	
-	// Wait for response
+	utils.Log("Connection request sent, waiting for response...")
+	
+	// Wait for response with timeout
 	msgChan := session.GetMessageChannel()
+	timeout := time.NewTimer(30 * time.Second)
+	defer timeout.Stop()
+	
 	select {
 	case msg := <-msgChan:
 		switch msg.Type {
 case MsgConnectionAccept:
-			utils.Log("Connection accepted")
+			utils.Log("Connection accepted by remote device")
 			tm.setActiveSession(session)
 			return session, nil
 		case MsgConnectionReject:
+			utils.Log("Connection rejected by remote device")
 			session.Close()
 			return nil, fmt.Errorf("connection rejected by remote device")
+		default:
+			utils.Log(fmt.Sprintf("Unexpected response type: %v", msg.Type))
+			session.Close()
+			return nil, fmt.Errorf("unexpected response from remote device")
 		}
-	case <-time.After(30 * time.Second):
+	case <-timeout.C:
 		session.Close()
-		return nil, fmt.Errorf("connection timeout")
+		return nil, fmt.Errorf("connection timeout - no response from remote device")
 	}
-	
-	return session, nil
 }
 
 // SendFile sends a file through the active session with maximum speed
@@ -287,7 +318,7 @@ func (tm *TransferManager) ReceiveFile(downloadPath string, progressChan chan<- 
 }
 
 // transferFileOptimized transfers a file with maximum network speed
-func (tm *TransferManager) transferFileOptimized(file *os.File, fileSize int64, conn net.Conn, progressChan chan<- float64, _ string) error {
+func (tm *TransferManager) transferFileOptimized(file *os.File, fileSize int64, conn net.Conn, progressChan chan<- float64, direction string) error {
 	buffer := make([]byte, ChunkSize)
 	var totalSent int64
 	startTime := time.Now()

@@ -189,15 +189,32 @@ func (s *Session) sendMessage(msgType MessageType, payload []byte) error {
 
 // receiveMessages receives and processes messages
 func (s *Session) receiveMessages() {
+	defer func() {
+		if r := recover(); r != nil {
+			utils.Log(fmt.Sprintf("Recovered from panic in receiveMessages: %v", r))
+		}
+	}()
+	
 	for {
 		select {
 		case <-s.stopChan:
+			utils.Log("Stopping message receiver")
 			return
 		default:
+			// Set read deadline to allow checking stopChan periodically
+			// Use longer timeout during normal operation
+			s.Conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+			
 			var msgType MessageType
 			if err := binary.Read(s.Conn, binary.LittleEndian, &msgType); err != nil {
+				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+					// Timeout is expected, continue to check stopChan
+					continue
+				}
 				if err != io.EOF {
 					utils.LogError("Error reading message type", err)
+				} else {
+					utils.Log("Connection closed by remote peer")
 				}
 				s.Close()
 				return
@@ -205,16 +222,32 @@ func (s *Session) receiveMessages() {
 			
 			var payloadLen int32
 			if err := binary.Read(s.Conn, binary.LittleEndian, &payloadLen); err != nil {
+				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+					continue
+				}
 				utils.LogError("Error reading payload length", err)
 				s.Close()
 				return
 			}
 			
-			payload := make([]byte, payloadLen)
-			if _, err := io.ReadFull(s.Conn, payload); err != nil {
-				utils.LogError("Error reading payload", err)
+			if payloadLen < 0 || payloadLen > 10*1024*1024 { // Max 10MB payload
+				utils.Log(fmt.Sprintf("Invalid payload length: %d", payloadLen))
 				s.Close()
 				return
+			}
+			
+			payload := make([]byte, payloadLen)
+			if payloadLen > 0 {
+				s.Conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+				if _, err := io.ReadFull(s.Conn, payload); err != nil {
+					if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+						utils.LogError("Timeout reading payload", err)
+					} else {
+						utils.LogError("Error reading payload", err)
+					}
+					s.Close()
+					return
+				}
 			}
 			
 			msg := SessionMessage{
@@ -222,10 +255,12 @@ func (s *Session) receiveMessages() {
 				Payload: payload,
 			}
 			
+			utils.LogDebug(fmt.Sprintf("Received message type: %v, payload size: %d", msgType, payloadLen))
+			
 			select {
 			case s.messageChan <- msg:
-			default:
-				utils.Log("Message channel full, dropping message")
+			case <-time.After(1 * time.Second):
+				utils.Log("Message channel full or blocked, dropping message")
 			}
 		}
 	}
@@ -239,11 +274,21 @@ func (s *Session) sendKeepAlive() {
 	for {
 		select {
 		case <-ticker.C:
+			s.mu.RLock()
+			state := s.State
+			s.mu.RUnlock()
+			
+			if state != SessionActive {
+				return
+			}
+			
 			if err := s.sendMessage(MsgKeepAlive, []byte("ping")); err != nil {
 				utils.LogError("Failed to send keepalive", err)
 				s.Close()
 				return
 			}
+			utils.LogDebug("Keepalive sent")
+			
 		case <-s.stopChan:
 			return
 		}
