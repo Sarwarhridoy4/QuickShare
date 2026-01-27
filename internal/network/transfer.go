@@ -137,11 +137,12 @@ func (tm *TransferManager) ConnectToDevice(device *Device, localDeviceName strin
 	msgChan := session.GetMessageChannel()
 	select {
 	case msg := <-msgChan:
-		if msg.Type == MsgConnectionAccept {
+		switch msg.Type {
+case MsgConnectionAccept:
 			utils.Log("Connection accepted")
 			tm.setActiveSession(session)
 			return session, nil
-		} else if msg.Type == MsgConnectionReject {
+		case MsgConnectionReject:
 			session.Close()
 			return nil, fmt.Errorf("connection rejected by remote device")
 		}
@@ -286,7 +287,7 @@ func (tm *TransferManager) ReceiveFile(downloadPath string, progressChan chan<- 
 }
 
 // transferFileOptimized transfers a file with maximum network speed
-func (tm *TransferManager) transferFileOptimized(file *os.File, fileSize int64, conn net.Conn, progressChan chan<- float64, direction string) error {
+func (tm *TransferManager) transferFileOptimized(file *os.File, fileSize int64, conn net.Conn, progressChan chan<- float64, _ string) error {
 	buffer := make([]byte, ChunkSize)
 	var totalSent int64
 	startTime := time.Now()
