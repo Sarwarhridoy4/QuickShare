@@ -1,6 +1,0 @@
-2026/01/27 14:28:42 logger.go:48: Logger initialized
-2026/01/27 14:28:42 logger.go:48: Starting File Transfer Application
-2026/01/27 14:28:42 logger.go:48: Loading platform-specific icon
-2026/01/27 14:28:42 logger.go:48: Local IP detected: 192.168.1.249
-2026/01/27 14:28:55 logger.go:48: File added: /home/sarwar/Downloads/code_1.108.2-1769004815_amd64.deb (Total: 1)
-2026/01/27 14:29:05 logger.go:48: File added: /home/sarwar/Downloads/github-ssh-manager_2.0.0_amd64.deb (Total: 2)
