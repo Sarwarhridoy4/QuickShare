@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -49,6 +50,7 @@ type FileTransferApp struct {
 	activeSession     *network.Session
 	selectedFiles     []string
 	currentScreen     string
+	monitorRunning    bool
 }
 
 func NewFileTransferApp() *FileTransferApp {
@@ -287,6 +289,8 @@ func (fta *FileTransferApp) connectToDevice(device *network.Device) {
 			return
 		}
 		
+		utils.Log("Connection successful, setting up UI")
+		
 		fta.activeSession = session
 		fta.remoteDeviceLabel.SetText(fmt.Sprintf("Connected to: %s (%s)", device.Name, device.IP))
 		fta.statusLabel.SetText("Connected - Ready to transfer files")
@@ -297,8 +301,14 @@ func (fta *FileTransferApp) connectToDevice(device *network.Device) {
 		
 		fta.showScreen("session")
 		
-		// Start monitoring for incoming files
-		go fta.monitorSession()
+		// Start monitoring for incoming files only if not already running
+		if !fta.monitorRunning {
+			fta.monitorRunning = true
+			utils.Log("Starting session monitor (sender side)")
+			go fta.monitorSession()
+		} else {
+			utils.Log("Session monitor already running")
+		}
 	}()
 }
 
@@ -331,8 +341,14 @@ func (fta *FileTransferApp) handleConnectionRequest(session *network.Session, re
 			fta.statusLabel.SetText("Connected - Ready to transfer files")
 			fta.showScreen("session")
 			
-			// Start monitoring session
-			go fta.monitorSession()
+			// Start monitoring session only if not already running
+			if !fta.monitorRunning {
+				fta.monitorRunning = true
+				utils.Log("Starting session monitor (receiver side)")
+				go fta.monitorSession()
+			} else {
+				utils.Log("Session monitor already running")
+			}
 			
 			return true
 		} else {
@@ -347,17 +363,42 @@ func (fta *FileTransferApp) handleConnectionRequest(session *network.Session, re
 
 func (fta *FileTransferApp) monitorSession() {
 	if fta.activeSession == nil {
+		utils.Log("Monitor called but no active session")
+		fta.monitorRunning = false
 		return
 	}
 	
-	utils.Log("Starting session monitor")
+	utils.Log("Session monitor started")
 	msgChan := fta.activeSession.GetMessageChannel()
+	
+	defer func() {
+		utils.Log("Session monitor stopped")
+		fta.monitorRunning = false
+	}()
 	
 	for msg := range msgChan {
 		switch msg.Type {
 		case network.MsgFileOffer:
-			utils.Log("Received file offer, starting receive")
-			// Incoming file - automatically start receiving
+			utils.Log("Received file offer")
+			
+			// Parse the offer
+			var offer network.FileOffer
+			if err := json.Unmarshal(msg.Payload, &offer); err != nil {
+				utils.LogError("Failed to parse file offer", err)
+				continue
+			}
+			
+			utils.Log(fmt.Sprintf("File offer: %s (%.2f MB)", offer.FileName, float64(offer.FileSize)/1024/1024))
+			
+			// Send accept message
+			if err := fta.activeSession.AcceptFile(); err != nil {
+				utils.LogError("Failed to accept file", err)
+				dialog.ShowError(fmt.Errorf("Failed to accept file: %v", err), fta.window)
+				continue
+			}
+			
+			utils.Log("File accepted, starting receive")
+			// Start receiving
 			go fta.receiveFile()
 			
 		case network.MsgKeepAlive:
@@ -374,7 +415,6 @@ func (fta *FileTransferApp) monitorSession() {
 			utils.LogDebug(fmt.Sprintf("Received message type: %v", msg.Type))
 		}
 	}
-	utils.Log("Session message channel closed")
 }
 
 func (fta *FileTransferApp) handleSelectAndSendFiles() {
@@ -485,8 +525,11 @@ func (fta *FileTransferApp) sendFile(filePath string) {
 }
 
 func (fta *FileTransferApp) receiveFile() {
+	utils.Log("Starting file receive process")
+	
 	fta.currentFileLabel.SetText("Receiving file...")
 	fta.progressBar.SetValue(0)
+	fta.speedLabel.SetText("Speed: 0 MB/s")
 	fta.showScreen("transfer")
 	
 	go func() {
@@ -495,16 +538,22 @@ func (fta *FileTransferApp) receiveFile() {
 		errChan := make(chan error, 1)
 		
 		startTime := utils.Now()
-		var fileSize int64
 		
 		go func() {
+			utils.Log("Calling ReceiveFile...")
 			filename, err := fta.transferMgr.ReceiveFile(fta.config.DownloadPath, progressChan)
 			if err != nil {
+				utils.LogError("ReceiveFile error", err)
 				errChan <- err
 			} else {
+				utils.Log(fmt.Sprintf("File received successfully: %s", filename))
 				done <- filename
 			}
 		}()
+		
+		// Monitor progress
+		ticker := time.NewTicker(100 * time.Millisecond)
+		defer ticker.Stop()
 		
 		for {
 			select {
@@ -512,23 +561,28 @@ func (fta *FileTransferApp) receiveFile() {
 				fta.progressBar.SetValue(progress)
 				
 				elapsed := utils.Since(startTime).Seconds()
-				if elapsed > 0 && fileSize > 0 {
-					bytesTransferred := int64(progress * float64(fileSize))
-					speed := float64(bytesTransferred) / elapsed / 1024 / 1024
-					fta.speedLabel.SetText(fmt.Sprintf("Speed: %.2f MB/s", speed))
+				if elapsed > 0 {
+					// Estimate speed based on progress
+					speed := progress / elapsed * 100 // Rough estimate
+					fta.speedLabel.SetText(fmt.Sprintf("Speed: %.2f MB/s (%.0f%%)", speed, progress*100))
 				}
+				
+			case <-ticker.C:
+				// Keep UI responsive
 				
 			case filename := <-done:
 				fta.progressBar.SetValue(1.0)
 				dialog.ShowInformation("Success", 
 					fmt.Sprintf("File received:\n%s", filename), fta.window)
 				fta.statusLabel.SetText("File received successfully")
+				utils.Log("Receive complete, returning to session screen")
 				fta.showScreen("session")
 				return
 				
 			case err := <-errChan:
-				dialog.ShowError(err, fta.window)
+				dialog.ShowError(fmt.Errorf("Receive failed: %v", err), fta.window)
 				fta.statusLabel.SetText(fmt.Sprintf("Error: %v", err))
+				utils.LogError("Receive failed", err)
 				fta.showScreen("session")
 				return
 			}
@@ -554,6 +608,8 @@ func (fta *FileTransferApp) handleChooseDownloadLocation() {
 
 func (fta *FileTransferApp) handleDisconnect() {
 	utils.Log("User initiated disconnect")
+	
+	fta.monitorRunning = false
 	
 	if fta.activeSession != nil {
 		fta.activeSession.Close()

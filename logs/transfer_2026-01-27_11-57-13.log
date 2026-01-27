@@ -1,8 +1,0 @@
-2026/01/27 11:57:13 logger.go:48: Logger initialized
-2026/01/27 11:57:13 logger.go:48: Starting QShare Application...
-2026/01/27 11:57:14 logger.go:48: Loading platform-specific icon
-2026/01/27 11:57:14 logger.go:48: Starting discovery service...
-2026/01/27 11:57:14 logger.go:48: Listening for connections on port 9999
-2026/01/27 11:57:29 logger.go:48: ERROR: Error reading UDP packet - read udp [::]:9998: use of closed network connection
-2026/01/27 11:57:29 logger.go:48: Discovery service stopped
-2026/01/27 11:57:29 logger.go:48: ERROR: Error accepting connection - accept tcp [::]:9999: use of closed network connection

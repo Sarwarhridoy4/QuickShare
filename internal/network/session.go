@@ -193,75 +193,87 @@ func (s *Session) receiveMessages() {
 		if r := recover(); r != nil {
 			utils.Log(fmt.Sprintf("Recovered from panic in receiveMessages: %v", r))
 		}
+		utils.Log("Message receiver stopped")
 	}()
 	
 	for {
+		// Check if we should stop
 		select {
 		case <-s.stopChan:
-			utils.Log("Stopping message receiver")
+			utils.Log("Stopping message receiver - stop signal received")
 			return
 		default:
-			// Set read deadline to allow checking stopChan periodically
-			// Use longer timeout during normal operation
+		}
+		
+		// Check session state
+		s.mu.RLock()
+		state := s.State
+		s.mu.RUnlock()
+		
+		if state != SessionActive {
+			utils.Log(fmt.Sprintf("Stopping message receiver - session not active (state: %v)", state))
+			return
+		}
+		
+		// Set read deadline to allow checking stopChan periodically
+		s.Conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+		
+		var msgType MessageType
+		if err := binary.Read(s.Conn, binary.LittleEndian, &msgType); err != nil {
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				// Timeout is expected, continue to check stopChan
+				continue
+			}
+			if err != io.EOF {
+				utils.LogError("Error reading message type", err)
+			} else {
+				utils.Log("Connection closed by remote peer")
+			}
+			s.Close()
+			return
+		}
+		
+		var payloadLen int32
+		if err := binary.Read(s.Conn, binary.LittleEndian, &payloadLen); err != nil {
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				continue
+			}
+			utils.LogError("Error reading payload length", err)
+			s.Close()
+			return
+		}
+		
+		if payloadLen < 0 || payloadLen > 10*1024*1024 {
+			utils.Log(fmt.Sprintf("Invalid payload length: %d", payloadLen))
+			s.Close()
+			return
+		}
+		
+		payload := make([]byte, payloadLen)
+		if payloadLen > 0 {
 			s.Conn.SetReadDeadline(time.Now().Add(30 * time.Second))
-			
-			var msgType MessageType
-			if err := binary.Read(s.Conn, binary.LittleEndian, &msgType); err != nil {
+			if _, err := io.ReadFull(s.Conn, payload); err != nil {
 				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-					// Timeout is expected, continue to check stopChan
-					continue
-				}
-				if err != io.EOF {
-					utils.LogError("Error reading message type", err)
+					utils.LogError("Timeout reading payload", err)
 				} else {
-					utils.Log("Connection closed by remote peer")
+					utils.LogError("Error reading payload", err)
 				}
 				s.Close()
 				return
 			}
-			
-			var payloadLen int32
-			if err := binary.Read(s.Conn, binary.LittleEndian, &payloadLen); err != nil {
-				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-					continue
-				}
-				utils.LogError("Error reading payload length", err)
-				s.Close()
-				return
-			}
-			
-			if payloadLen < 0 || payloadLen > 10*1024*1024 { // Max 10MB payload
-				utils.Log(fmt.Sprintf("Invalid payload length: %d", payloadLen))
-				s.Close()
-				return
-			}
-			
-			payload := make([]byte, payloadLen)
-			if payloadLen > 0 {
-				s.Conn.SetReadDeadline(time.Now().Add(30 * time.Second))
-				if _, err := io.ReadFull(s.Conn, payload); err != nil {
-					if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-						utils.LogError("Timeout reading payload", err)
-					} else {
-						utils.LogError("Error reading payload", err)
-					}
-					s.Close()
-					return
-				}
-			}
-			
-			msg := SessionMessage{
-				Type:    msgType,
-				Payload: payload,
-			}
-			
-			utils.LogDebug(fmt.Sprintf("Received message type: %v, payload size: %d", msgType, payloadLen))
-			
-			select {
-			case s.messageChan <- msg:
-			case <-time.After(1 * time.Second):
-				utils.Log("Message channel full or blocked, dropping message")
-			}
+		}
+		
+		msg := SessionMessage{
+			Type:    msgType,
+			Payload: payload,
+		}
+		
+		utils.LogDebug(fmt.Sprintf("Received message type: %v, payload size: %d", msgType, payloadLen))
+		
+		select {
+		case s.messageChan <- msg:
+		case <-time.After(1 * time.Second):
+			utils.Log("Message channel blocked, dropping message")
 		}
 	}
 }
@@ -329,9 +341,22 @@ func (s *Session) Close() {
 		return
 	}
 	
-	s.State = SessionClosed
-	close(s.stopChan)
+	utils.Log(fmt.Sprintf("Closing session with %s", s.RemoteDevice.IP))
 	
+	s.State = SessionClosed
+	
+	// Close stop channel first
+	select {
+	case <-s.stopChan:
+		// Already closed
+	default:
+		close(s.stopChan)
+	}
+	
+	// Give goroutines time to exit gracefully
+	time.Sleep(100 * time.Millisecond)
+	
+	// Close connection
 	if s.Conn != nil {
 		s.Conn.Close()
 	}
