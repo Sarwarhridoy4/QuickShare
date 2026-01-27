@@ -6,7 +6,7 @@
 set -e
 
 echo "==================================="
-echo "File Transfer App - Build Script"
+echo "Quick Share - Build Script"
 echo "==================================="
 
 # Colors

@@ -8,7 +8,7 @@ import (
 func main() {
 	// Initialize logger
 	utils.InitLogger()
-	utils.Log("Starting File Transfer Application")
+	utils.Log("Starting QShare Application...")
 
 	// Create and run the application
 	app := ui.NewFileTransferApp()

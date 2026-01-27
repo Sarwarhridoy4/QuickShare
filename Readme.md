@@ -4,12 +4,16 @@ A high-speed, cross-platform file transfer application built with Go and Fyne, s
 
 ## Features
 
-- 🚀 **High-Speed Transfer**: Optimized TCP transfer with 64KB chunks
+- 🚀 **High-Speed Transfer**: Optimized TCP transfer with 256KB chunks and 4MB buffers
+- 🔍 **Auto-Discovery**: Automatically finds devices on the same network
 - 📱 **Mobile-First Design**: Responsive UI that adapts to any screen size
 - 🖥️ **Cross-Platform**: Works on Windows, macOS, Linux, Android, and iOS
 - ⚡ **Non-Blocking Operations**: Multithreaded transfers using Go routines
-- 📊 **Real-Time Progress**: Live transfer progress and speed indicators
+- 🔄 **Bidirectional Transfer**: Send and receive files in the same session
+- 📊 **Real-Time Progress**: Live transfer progress and speed on both devices
 - 📁 **Custom Download Location**: Choose where to save received files
+- 🤝 **Session Management**: Secure connection requests with approval dialog
+- 🌐 **Maximum Network Speed**: Utilizes full physical network adapter capabilities
 - 🔒 **Reliable**: Robust error handling and automatic retries
 - 📝 **Logging**: Comprehensive logging for debugging and monitoring
 
@@ -100,24 +104,40 @@ fyne package -os ios -appID com.filetransfer.app
 
 ## Usage
 
-### Sending a File
+### Discovering Devices
 
 1. Launch the application on both devices
-2. Note the IP address displayed on the receiving device
-3. On the sending device:
-   - Click "Select File" and choose a file
-   - Click "Send File"
-   - Enter the recipient's IP address
-   - Click "Send"
+2. The app automatically discovers other devices on the same network
+3. Available devices appear in the list with their name and IP address
+4. Tap "Refresh" to manually update the device list
+
+### Connecting to a Device
+
+1. Select a device from the discovery list
+2. The app sends a connection request
+3. On the remote device, a popup appears asking to accept/reject
+4. Once accepted, both devices show the "Connected" screen
+
+### Sending a File
+
+1. After connection is established
+2. Click "Send Files" on your device
+3. Select the file you want to send
+4. Transfer begins automatically
+5. Progress shown on both sender and receiver
 
 ### Receiving a File
 
-1. Launch the application
-2. (Optional) Click "Choose Download Location" to set a custom save location
-3. Note your IP address displayed in the app
-4. Click "Receive File"
-5. The app will wait for incoming transfers
-6. Files are saved in the configured download directory (default: `downloads/`)
+1. When connected, the app automatically accepts incoming files
+2. Progress is shown in real-time
+3. Files are saved to the configured download directory
+4. A notification appears when transfer completes
+
+### Disconnecting
+
+1. Click the "Disconnect" button
+2. Returns to device discovery screen
+3. Can connect to other devices
 
 ## Configuration
 
@@ -145,16 +165,21 @@ The download path will be validated and created if it doesn't exist.
 
 ## Network Requirements
 
-- Both devices must be on the same network or have direct connectivity
-- Port 9999 must be open and not blocked by firewalls
-- For best performance, use a wired connection or 5GHz Wi-Fi
+- Both devices must be on the same local network (LAN/WiFi)
+- Ports 9998 (discovery) and 9999 (transfer) must not be blocked by firewalls
+- UDP broadcast must be enabled for device discovery
+- For maximum performance, use wired Gigabit Ethernet or 5GHz Wi-Fi
 
-## Performance
+### Performance Optimization
 
-- Transfer speed depends on network bandwidth
-- Optimized for LAN transfers (typically 50-100 MB/s on gigabit networks)
-- Uses 64KB chunks for optimal throughput
-- Non-blocking operations ensure UI remains responsive
+The app is optimized for maximum network throughput:
+
+- **256KB chunk size** for optimal data transfer
+- **4MB TCP buffers** for high-speed transfers
+- **TCP_NODELAY** enabled to reduce latency
+- **Keepalive** enabled for connection stability
+- Achieves **50-100+ MB/s** on Gigabit networks
+- Achieves **20-50 MB/s** on 5GHz Wi-Fi
 
 ## Troubleshooting
 

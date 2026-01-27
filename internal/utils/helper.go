@@ -5,6 +5,16 @@ import (
 	"time"
 )
 
+// Now returns the current time
+func Now() time.Time {
+	return time.Now()
+}
+
+// Since returns the duration since t
+func Since(t time.Time) time.Duration {
+	return time.Since(t)
+}
+
 // FormatDuration formats a duration into human-readable format
 func FormatDuration(d time.Duration) string {
 	if d < time.Second {

@@ -111,40 +111,66 @@ fyne package -os ios -appID com.filetransfer.app
 
 ## 🎯 First Transfer Test
 
-### On Device 1 (Receiver):
+### Quick Connection (Auto-Discovery):
+
+**On Device 1:**
 
 1. Start the app
-2. (Optional) Click **"Choose Download Location"** to select where files will be saved
-3. Note the IP address (e.g., 192.168.1.100)
-4. Click **"Receive File"**
-5. Wait for transfer
+2. Wait for Device 2 to appear in the list
+3. Tap on Device 2's name
 
-### On Device 2 (Sender):
+**On Device 2:**
 
 1. Start the app
-2. Click **"Select File"** and choose a file
-3. Click **"Send File"**
-4. Enter receiver's IP (192.168.1.100)
-5. Click **"Send"**
+2. See connection request popup from Device 1
+3. Tap "Accept"
 
-The file will transfer with real-time progress!
+**Both Devices:**
+
+- Now connected and ready!
+- Transfer progress shows on both sides
+
+### Send a File:
+
+1. On either device, click **"Send Files"**
+2. Select a file
+3. Watch real-time progress on both devices
+4. Receive notification when complete
+
+### Receive a File:
+
+- Automatic! Just wait for incoming files
+- No need to click "Receive"
+- Progress updates in real-time
+- Files saved to download folder
 
 ## 🔧 Quick Troubleshooting
 
-### "Cannot connect to receiver"
+### "No devices found"
+
+- Ensure both devices are on the same WiFi/LAN
+- Check if UDP port 9998 is blocked
+- Try clicking "Refresh"
+- Disable VPN temporarily
+
+### "Connection request timeout"
+
 - Ensure both devices are on the same network
-- Check firewall: allow port 9999
-- Verify IP address is correct
+- Check firewall: allow ports 9998-9999
+- Try connecting from the other device
 
 ### "Permission denied"
+
 - On Linux: `chmod +x filetransfer`
 - On mobile: Grant storage permissions in settings
 
 ### "Module not found"
+
 - Run `go mod tidy`
 - Ensure you're in the project root directory
 
 ### Slow transfer speeds
+
 - Use wired connection if possible
 - Switch to 5GHz Wi-Fi
 - Close other network applications
@@ -162,21 +188,25 @@ dd if=/dev/zero of=testfile.bin bs=1M count=100
 ```
 
 Expected speeds:
-- Gigabit Ethernet: 50-100 MB/s
-- Wi-Fi 5GHz: 20-50 MB/s
-- Wi-Fi 2.4GHz: 5-20 MB/s
+
+- Gigabit Ethernet: **80-120 MB/s**
+- Wi-Fi 6 (5GHz): **40-80 MB/s**
+- Wi-Fi 5 (5GHz): **20-50 MB/s**
+- Wi-Fi 2.4GHz: **5-20 MB/s**
 
 ## 🎨 Customization Quick Tips
 
 ### Change Download Location
 
 **Via UI:**
+
 ```
 Click "Choose Download Location" → Select folder → Done!
 ```
 
 **Via Config:**
 Edit `config/app_config.json`:
+
 ```json
 {
   "download_path": "/path/to/your/downloads"
@@ -186,6 +216,7 @@ Edit `config/app_config.json`:
 ### Change Port
 
 Edit `internal/network/transfer.go`:
+
 ```go
 const Port = 8888  // Change from 9999
 ```
@@ -193,6 +224,7 @@ const Port = 8888  // Change from 9999
 ### Change Download Location
 
 Edit `internal/utils/config.go`:
+
 ```go
 DownloadPath: "./my-downloads",
 ```
@@ -200,6 +232,7 @@ DownloadPath: "./my-downloads",
 ### Increase Transfer Speed
 
 Edit `internal/network/transfer.go`:
+
 ```go
 const ChunkSize = 128 * 1024  // Increase from 64KB
 ```
