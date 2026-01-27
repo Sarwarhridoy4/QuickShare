@@ -1,0 +1,32 @@
+# Build artifacts
+quickshare
+quickshare-deb/
+QuickShare.AppDir/
+*.deb
+*.AppImage
+appimagetool
+
+# IDE and Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+
+# Dependencies
+vendor/
+go.sum
+
+# Temporary files
+tmp/
+temp/
+*.tmp
