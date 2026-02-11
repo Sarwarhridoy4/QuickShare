@@ -1,8 +1,11 @@
 package file
 
 import (
-	"github.com/Sarwarhridoy4/QuickShare/internal/utils"
+	"os"
+	"path/filepath"
 	"runtime"
+
+	"github.com/Sarwarhridoy4/QuickShare/internal/utils"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/theme"
@@ -30,26 +33,83 @@ func LoadIcon() fyne.Resource {
 }
 
 func loadWindowsIcon() fyne.Resource {
-	// Attempt to load from assets/icons/windows.ico
-	// For now, return default icon
-	// In production, you would use:
-	// return fyne.NewStaticResource("icon", iconData)
-	return theme.FileIcon()
+	return loadIconFromPaths(
+		"Icon.png",
+		"icon.png",
+		"assets/icons/windows.ico",
+		"assets/icons/icon.png",
+	)
 }
 
 func loadMacIcon() fyne.Resource {
-	// Attempt to load from assets/icons/mac.icns
-	return theme.FileIcon()
+	return loadIconFromPaths(
+		"Icon.png",
+		"icon.png",
+		"assets/icons/mac.icns",
+		"assets/icons/icon.png",
+	)
 }
 
 func loadLinuxIcon() fyne.Resource {
-	// Attempt to load from assets/icons/linux.png
-	return theme.FileIcon()
+	return loadIconFromPaths(
+		"Icon.png",
+		"icon.png",
+		"assets/icons/linux.png",
+		"assets/icons/icon.png",
+	)
 }
 
 func loadMobileIcon() fyne.Resource {
-	// Attempt to load from assets/icons/mobile.png
+	return loadIconFromPaths(
+		"Icon.png",
+		"icon.png",
+		"assets/icons/mobile.png",
+		"assets/icons/icon.png",
+	)
+}
+
+func loadIconFromPaths(candidates ...string) fyne.Resource {
+	for _, candidate := range candidates {
+		if candidate == "" {
+			continue
+		}
+
+		icon := loadIconFile(candidate)
+		if icon != nil {
+			return icon
+		}
+	}
+
+	utils.Log("No custom icon found, using default theme icon")
 	return theme.FileIcon()
+}
+
+func loadIconFile(candidate string) fyne.Resource {
+	searchPaths := []string{candidate}
+
+	if wd, err := os.Getwd(); err == nil {
+		searchPaths = append(searchPaths, filepath.Join(wd, candidate))
+	}
+
+	if exe, err := os.Executable(); err == nil {
+		exeDir := filepath.Dir(exe)
+		searchPaths = append(searchPaths,
+			filepath.Join(exeDir, candidate),
+			filepath.Join(exeDir, "..", candidate),
+			filepath.Join(exeDir, "..", "..", candidate),
+		)
+	}
+
+	for _, path := range searchPaths {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		utils.Log("Loaded icon from " + path)
+		return fyne.NewStaticResource(filepath.Base(candidate), data)
+	}
+
+	return nil
 }
 
 // GetTheme returns the appropriate theme based on platform

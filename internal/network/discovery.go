@@ -36,7 +36,7 @@ type DiscoveryService struct {
 // NewDiscoveryService creates a new discovery service
 func NewDiscoveryService(deviceName string, callback func([]*Device)) *DiscoveryService {
 	localIP := GetLocalIP()
-	
+
 	return &DiscoveryService{
 		localDevice: Device{
 			Name:       deviceName,
@@ -54,28 +54,28 @@ func NewDiscoveryService(deviceName string, callback func([]*Device)) *Discovery
 // Start begins the discovery process
 func (ds *DiscoveryService) Start() error {
 	utils.Log("Starting discovery service...")
-	
+
 	// Setup UDP listener for broadcasts
 	addr := net.UDPAddr{
 		Port: DiscoveryPort,
 		IP:   net.ParseIP("0.0.0.0"),
 	}
-	
+
 	conn, err := net.ListenUDP("udp", &addr)
 	if err != nil {
 		return fmt.Errorf("failed to start UDP listener: %w", err)
 	}
 	ds.conn = conn
-	
+
 	// Start broadcast sender
 	go ds.broadcastPresence()
-	
+
 	// Start broadcast receiver
 	go ds.listenForDevices()
-	
+
 	// Start cleanup routine
 	go ds.cleanupStaleDevices()
-	
+
 	return nil
 }
 
@@ -83,12 +83,12 @@ func (ds *DiscoveryService) Start() error {
 func (ds *DiscoveryService) broadcastPresence() {
 	ticker := time.NewTicker(BroadcastInterval)
 	defer ticker.Stop()
-	
+
 	broadcastAddr := &net.UDPAddr{
 		IP:   net.IPv4(255, 255, 255, 255),
 		Port: DiscoveryPort,
 	}
-	
+
 	for {
 		select {
 		case <-ticker.C:
@@ -97,20 +97,20 @@ func (ds *DiscoveryService) broadcastPresence() {
 				utils.LogError("Failed to marshal device info", err)
 				continue
 			}
-			
+
 			// Send broadcast
 			conn, err := net.DialUDP("udp", nil, broadcastAddr)
 			if err != nil {
 				utils.LogError("Failed to create broadcast connection", err)
 				continue
 			}
-			
+
 			_, err = conn.Write(data)
 			if err != nil {
 				utils.LogError("Failed to send broadcast", err)
 			}
 			conn.Close()
-			
+
 		case <-ds.stopChan:
 			return
 		}
@@ -120,7 +120,7 @@ func (ds *DiscoveryService) broadcastPresence() {
 // listenForDevices receives broadcast messages from other devices
 func (ds *DiscoveryService) listenForDevices() {
 	buffer := make([]byte, 1024)
-	
+
 	for {
 		select {
 		case <-ds.stopChan:
@@ -132,27 +132,30 @@ func (ds *DiscoveryService) listenForDevices() {
 				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 					continue
 				}
+				if isExpectedNetCloseError(err) {
+					return
+				}
 				utils.LogError("Error reading UDP packet", err)
 				continue
 			}
-			
+
 			var device Device
 			if err := json.Unmarshal(buffer[:n], &device); err != nil {
 				utils.LogError("Failed to unmarshal device info", err)
 				continue
 			}
-			
+
 			// Ignore own broadcasts
 			if device.IP == ds.localDevice.IP {
 				continue
 			}
-			
+
 			// Update device list
 			device.LastSeen = time.Now()
 			ds.discoveredDevs[device.IP] = &device
-			
+
 			utils.Log(fmt.Sprintf("Discovered device: %s (%s)", device.Name, device.IP))
-			
+
 			// Notify callback
 			if ds.updateCallback != nil {
 				ds.updateCallback(ds.GetActiveDevices())
@@ -165,13 +168,13 @@ func (ds *DiscoveryService) listenForDevices() {
 func (ds *DiscoveryService) cleanupStaleDevices() {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-ticker.C:
 			now := time.Now()
 			updated := false
-			
+
 			for ip, device := range ds.discoveredDevs {
 				if now.Sub(device.LastSeen) > DeviceTimeout {
 					delete(ds.discoveredDevs, ip)
@@ -179,11 +182,11 @@ func (ds *DiscoveryService) cleanupStaleDevices() {
 					updated = true
 				}
 			}
-			
+
 			if updated && ds.updateCallback != nil {
 				ds.updateCallback(ds.GetActiveDevices())
 			}
-			
+
 		case <-ds.stopChan:
 			return
 		}
@@ -201,7 +204,12 @@ func (ds *DiscoveryService) GetActiveDevices() []*Device {
 
 // Stop stops the discovery service
 func (ds *DiscoveryService) Stop() {
-	close(ds.stopChan)
+	select {
+	case <-ds.stopChan:
+		// Already closed.
+	default:
+		close(ds.stopChan)
+	}
 	if ds.conn != nil {
 		ds.conn.Close()
 	}

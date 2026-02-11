@@ -57,6 +57,9 @@ func (tm *TransferManager) acceptConnections() {
 	for {
 		conn, err := tm.listener.Accept()
 		if err != nil {
+			if isExpectedNetCloseError(err) {
+				return
+			}
 			utils.LogError("Error accepting connection", err)
 			return
 		}

@@ -59,6 +59,7 @@ func NewFileTransferApp() *FileTransferApp {
 	
 	icon := file.LoadIcon()
 	if icon != nil {
+		a.SetIcon(icon)
 		w.SetIcon(icon)
 	}
 
