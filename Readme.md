@@ -59,6 +59,28 @@ go run .
 go build -o quickshare .
 ```
 
+## Packaging (Linux)
+
+Use the project build script for Linux packages:
+
+```bash
+# Debian package (.deb)
+./build.sh debian linux
+
+# AppImage package (.AppImage)
+./build.sh appimage linux
+
+# Build both Debian + AppImage
+./build.sh linuxpkg
+```
+
+Output artifacts are written to `build/`.
+
+Prerequisites:
+
+- `dpkg-deb` (for Debian packaging)
+- `appimagetool` (for AppImage packaging)
+
 ## How Transfer Works
 
 1. App starts discovery service (`internal/network/discovery.go`)
